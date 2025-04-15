@@ -1,0 +1,67 @@
+name: Deploy Node.js App
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u iqbalsha22 --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build -t iqbalsha22/dockerized-image:${{ github.sha }} .
+          docker tag iqbalsha22/dockerized-image:${{ github.sha }} iqbalsha22/dockerized-image:latest
+
+      - name: Push Docker image
+        run: |
+          docker push iqbalsha22/dockerized-image:${{ github.sha }}
+          docker push iqbalsha22/dockerized-image:latest
+
+  deploy:
+    needs: build   
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into remote server and deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Stopping existing container if running..."
+            docker stop my-container || true
+            docker rm my-container || true
+            
+            echo "Pulling new image..."
+            docker pull iqbalsha22/dockerized-image:latest
+
+            echo "Checking available Docker images..."
+            docker images
+            
+            echo "Checking running containers..."
+            docker ps -a
+
+            echo "DEBUG: Environment Variables"
+            echo "USERNAME: '${{ secrets.DOCKERIZEDSERVICEENV_USERNAME }}'"
+            echo "PASSWORD: '${{ secrets.DOCKERIZEDSERVICEENV_PASSWORD }}'"
+            echo "SECRET_MESSAGE: '${{ secrets.DOCKERIZEDSERVICEENV_SECRET_MESSAGE }}'"
+
+            echo "Running new container..."
+            docker run -d --name my-container -p 3000:3000 \
+              --env "USERNAME=${{ secrets.DOCKERIZEDSERVICEENV_USERNAME }}" \
+              --env "PASSWORD=${{ secrets.DOCKERIZEDSERVICEENV_PASSWORD }}" \
+              --env "SECRET_MESSAGE=${{ secrets.DOCKERIZEDSERVICEENV_SECRET_MESSAGE }}" \
+              iqbalsha22/dockerized-image:latest
+
+            echo "Verifying container status..."
+            docker ps -a
